@@ -8,29 +8,59 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// You normally want to run this under a separate "Testing" subscription
-// For lab purposes you will use your assigned subscription under the Cloud Dev/Ops program tenant
-var subscriptionID string = "<your-azure-subscription-id"
+var subscriptionID string = "aa8bf277-fdd4-4ec4-bcd4-3458ddb8af6c"
 
 func TestAzureLinuxVMCreation(t *testing.T) {
 	terraformOptions := &terraform.Options{
-		// The path to where our Terraform code is located
 		TerraformDir: "../",
-		// Override the default terraform variables
 		Vars: map[string]interface{}{
-			"labelPrefix": "<your-college-id>",
+			"labelPrefix": "parm0100",
 		},
 	}
 
+	// Ensure Terraform resources are destroyed at the end
 	defer terraform.Destroy(t, terraformOptions)
 
-	// Run `terraform init` and `terraform apply`. Fail the test if there are any errors.
+	// Run Terraform Init and Apply
 	terraform.InitAndApply(t, terraformOptions)
 
-	// Run `terraform output` to get the value of output variable
+	// Retrieve output variables from Terraform
 	vmName := terraform.Output(t, terraformOptions, "vm_name")
 	resourceGroupName := terraform.Output(t, terraformOptions, "resource_group_name")
+	publicIPName := terraform.Output(t, terraformOptions, "public_ip_name")
+	nsgName := terraform.Output(t, terraformOptions, "nsg_name")
 
-	// Confirm VM exists
-	assert.True(t, azure.VirtualMachineExists(t, vmName, resourceGroupName, subscriptionID))
+	// Confirm that the Virtual Machine exists
+	vmExists := azure.VirtualMachineExists(t, subscriptionID, resourceGroupName, vmName)
+	assert.True(t, vmExists, "Virtual Machine does not exist")
+
+	// Check if the Public IP exists
+	publicIPExists := azure.PublicIPExists(t, subscriptionID, resourceGroupName, publicIPName)
+	assert.True(t, publicIPExists, "Public IP does not exist")
+
+	// Check if the VM is running
+	vmPowerState := azure.GetVirtualMachinePowerState(t, subscriptionID, resourceGroupName, vmName)
+	assert.Equal(t, "VM running", vmPowerState, "Virtual Machine is not running")
+
+	// Validate Network Security Group existence
+	nsgExists := azure.NetworkSecurityGroupExists(t, subscriptionID, resourceGroupName, nsgName)
+	assert.True(t, nsgExists, "Network Security Group does not exist")
+
+	// Verify NSG rules allow SSH (Port 22) and HTTP (Port 80)
+	nsgRules := azure.GetNetworkSecurityGroupRules(t, subscriptionID, resourceGroupName, nsgName)
+
+	hasSSHRule := false
+	hasHTTPRule := false
+
+	for _, rule := range nsgRules {
+		if rule.DestinationPortRange == "22" && rule.Access == "Allow" {
+			hasSSHRule = true
+		}
+		if rule.DestinationPortRange == "80" && rule.Access == "Allow" {
+			hasHTTPRule = true
+		}
+	}
+
+	assert.True(t, hasSSHRule, "NSG does not have SSH rule (Port 22 open)")
+	assert.True(t, hasHTTPRule, "NSG does not have HTTP rule (Port 80 open)")
 }
